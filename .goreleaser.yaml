@@ -1,0 +1,78 @@
+version: 2
+
+project_name: subtrans
+
+builds:
+  - id: subtrans-cli
+    main: ./cmd/subtrans-cli
+    binary: subtrans-cli
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+
+  - id: subtrans-server
+    main: ./cmd/subtrans-server
+    binary: subtrans-server
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Tag }}_
+      {{- .Os }}_
+      {{- .Arch }}
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    files:
+      - README.md
+      - LICENSE
+      - .env.example
+
+checksum:
+  name_template: '{{ .ProjectName }}_{{ .Tag }}_checksums.txt'
+  algorithm: sha256
+
+changelog:
+  use: github-native
+
+release:
+  github:
+    owner: heartleo
+    name: subtrans
+  prerelease: auto
+  name_template: "{{.Tag}}"
+  draft: true
+  footer: |
+    ## Installation
+
+    ### Binary
+    Download the appropriate binary for your platform from the assets below.
+
+    ### Go Install
+    ```bash
+    go install github.com/heartleo/subtrans/cmd/subtrans-cli@{{ .Tag }}
+    go install github.com/heartleo/subtrans/cmd/subtrans-server@{{ .Tag }}
+    ```
