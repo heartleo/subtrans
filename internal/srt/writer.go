@@ -36,7 +36,11 @@ func Format(lines []*translator.Line, opts FormatOptions) string {
 		_, _ = fmt.Fprintf(&b, "%s --> %s\n", FormatTimestamp(line.Start), FormatTimestamp(line.End))
 
 		if opts.IncludeOriginal && line.Text != "" {
-			_, _ = fmt.Fprintf(&b, "%s\n", line.Text)
+			original := line.Text
+			if opts.StripTrailingPunctuation {
+				original = stripTrailing(original)
+			}
+			_, _ = fmt.Fprintf(&b, "%s\n", original)
 		}
 
 		_, _ = fmt.Fprintf(&b, "%s\n\n", translation)

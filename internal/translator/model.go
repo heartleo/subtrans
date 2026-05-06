@@ -1,4 +1,4 @@
-// Package subtrans contains the core subtitle translation types and logic.
+// Package translator contains the core subtitle translation types and logic.
 package translator
 
 import "time"
@@ -16,8 +16,7 @@ type Line struct {
 type Batch struct {
 	Number      int
 	Lines       []*Line
-	Summary     string // batch-level summary from AI; passed as context to next batch
-	RawResponse string // raw AI response text; kept for retry prompt construction
+	RawResponse string // raw AI response text; kept for debugging
 	Errors      []error
 }
 
@@ -34,12 +33,18 @@ type Options struct {
 	StripTrailingPunctuation bool // strip trailing periods and commas from each subtitle line; default: true
 }
 
+// Default translation settings.
+const (
+	DefaultMaxBatchSize          = 30
+	DefaultBatchSplitPunctuation = "."
+)
+
 // DefaultOptions returns an Options with sensible defaults.
 func DefaultOptions() Options {
 	return Options{
 		TargetLanguage:           "zh",
-		MaxBatchSize:             30,
-		BatchSplitPunctuation:    ".",
+		MaxBatchSize:             DefaultMaxBatchSize,
+		BatchSplitPunctuation:    DefaultBatchSplitPunctuation,
 		MaxRetries:               3,
 		StripTrailingPunctuation: true,
 	}

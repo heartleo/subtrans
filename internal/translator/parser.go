@@ -13,14 +13,12 @@ var ErrNoMatches = errors.New("no translation entries found in response")
 
 // ParseResult holds the output of parsing an AI translation response.
 type ParseResult struct {
-	BatchSummary string
-	Missing      []int // line numbers not found in the response
+	Missing []int // original SRT line numbers that received no translation
 }
 
 // translationResponse is the expected JSON structure from the LLM.
 type translationResponse struct {
 	Translations []translationEntry `json:"translations"`
-	BatchSummary string             `json:"batch_summary"`
 }
 
 type translationEntry struct {
@@ -28,9 +26,11 @@ type translationEntry struct {
 	Translation string `json:"translation"`
 }
 
-// ParseResponse extracts translations from the AI raw response and writes them
-// into the corresponding Line pointers. Returns metadata and missing line numbers.
-func ParseResponse(raw string, originals []*Line) (ParseResult, error) {
+// ParseResponse extracts translations from the raw AI response and writes them
+// into the corresponding Line pointers. lines must be the same ordered slice
+// that was passed to BuildPrompt or BuildRetryPrompt — matching is by sequential
+// position (entry number 1 → lines[0], number 2 → lines[1], …).
+func ParseResponse(raw string, lines []*Line) (ParseResult, error) {
 	cleaned := stripCodeFence(raw)
 
 	var resp translationResponse
@@ -41,33 +41,33 @@ func ParseResponse(raw string, originals []*Line) (ParseResult, error) {
 
 	if len(resp.Translations) == 0 {
 		slog.Warn("JSON parsed but translations array is empty")
-		return ParseResult{}, fmt.Errorf("%w", ErrNoMatches)
+		return ParseResult{}, ErrNoMatches
 	}
 
-	translationMap := make(map[int]string, len(resp.Translations))
+	// seq number (1-based) → translation text
+	seqMap := make(map[int]string, len(resp.Translations))
 	for _, e := range resp.Translations {
-		translationMap[e.Number] = e.Translation
+		seqMap[e.Number] = e.Translation
 	}
 
 	var missing []int
-	for _, line := range originals {
-		if t, ok := translationMap[line.Number]; ok {
-			trimmed := strings.TrimSpace(t)
-			if trimmed == "" {
-				slog.Warn("translation is empty string for line", "line", line.Number)
-				missing = append(missing, line.Number)
-			} else {
-				line.Translation = trimmed
-			}
-		} else {
+	for i, line := range lines {
+		seqNum := i + 1
+		t, ok := seqMap[seqNum]
+		if !ok {
 			missing = append(missing, line.Number)
+			continue
+		}
+		trimmed := strings.TrimSpace(t)
+		if trimmed == "" {
+			slog.Warn("empty translation for line", "line", line.Number)
+			missing = append(missing, line.Number)
+		} else {
+			line.Translation = trimmed
 		}
 	}
 
-	return ParseResult{
-		BatchSummary: strings.TrimSpace(resp.BatchSummary),
-		Missing:      missing,
-	}, nil
+	return ParseResult{Missing: missing}, nil
 }
 
 // stripCodeFence removes markdown code fences (```json ... ``` or ``` ... ```)
@@ -78,14 +78,11 @@ func stripCodeFence(raw string) string {
 		return raw
 	}
 
-	// Remove opening fence line (```json or ```)
-	firstNewline := strings.Index(trimmed, "\n")
-	if firstNewline < 0 {
+	_, inner, ok := strings.Cut(trimmed, "\n")
+	if !ok {
 		return raw
 	}
-	inner := trimmed[firstNewline+1:]
 
-	// Remove closing fence
 	if idx := strings.LastIndex(inner, "```"); idx >= 0 {
 		inner = inner[:idx]
 	}

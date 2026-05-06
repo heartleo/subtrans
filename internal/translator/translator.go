@@ -10,7 +10,7 @@ import (
 // maxTranslationRetries is the maximum number of retry attempts for missing translations.
 const maxTranslationRetries = 3
 
-// collectMissingLines returns the line numbers of lines with no translation yet.
+// collectMissingLines returns the original SRT line numbers of lines with no translation yet.
 func collectMissingLines(lines []*Line) []int {
 	var missing []int
 	for _, l := range lines {
@@ -21,9 +21,17 @@ func collectMissingLines(lines []*Line) []int {
 	return missing
 }
 
+// lastNLines returns the last n lines of the slice, or the whole slice if len ≤ n.
+func lastNLines(lines []*Line, n int) []*Line {
+	if len(lines) <= n {
+		return lines
+	}
+	return lines[len(lines)-n:]
+}
+
 // Translate runs the serial translation loop over all batches.
 func Translate(ctx context.Context, batches []*Batch, opts Options, completer Completer, handler TranslationHandler) {
-	batchSummary := ""
+	var contextLines []*Line
 
 	for _, batch := range batches {
 		if err := ctx.Err(); err != nil {
@@ -31,13 +39,8 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 			return
 		}
 
-		pct := PromptContext{
-			BatchSummary: batchSummary,
-		}
-
-		messages := BuildPrompt(batch.Lines, pct, opts)
+		messages := BuildPrompt(batch.Lines, PromptContext{ContextLines: contextLines}, opts)
 		raw, err := completer.Complete(ctx, messages)
-
 		if err != nil {
 			handler.OnError(batch.Number, fmt.Errorf("API error: %w", err))
 			return
@@ -59,7 +62,6 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 				"translated", len(batch.Lines)-len(result.Missing), "missing", len(result.Missing))
 		}
 
-		// Use line.Translation == "" as the authoritative source for what is still missing.
 		missingNums := collectMissingLines(batch.Lines)
 
 		for attempt := 1; attempt <= maxTranslationRetries && len(missingNums) > 0; attempt++ {
@@ -67,7 +69,7 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 				"batch", batch.Number,
 				"attempt", attempt, "missing_count", len(missingNums), "missing_lines", missingNums)
 
-			retryMessages := BuildRetryPrompt(batch.Lines, missingNums, opts)
+			retryMessages, retryLines := BuildRetryPrompt(batch.Lines, missingNums, opts)
 			retryRaw, retryErr := completer.Complete(ctx, retryMessages)
 			if retryErr != nil {
 				slog.Error("retry API call failed",
@@ -76,13 +78,11 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 				break
 			}
 
-			retryResult, retryParseErr := ParseResponse(retryRaw, batch.Lines)
+			_, retryParseErr := ParseResponse(retryRaw, retryLines)
 			if retryParseErr != nil && !errors.Is(retryParseErr, ErrNoMatches) {
 				slog.Error("retry response parse failed",
 					"batch", batch.Number,
 					"attempt", attempt, "error", retryParseErr)
-			} else if retryParseErr == nil {
-				result = retryResult
 			}
 
 			missingNums = collectMissingLines(batch.Lines)
@@ -102,19 +102,15 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 			return
 		}
 
-		batch.Summary = result.BatchSummary
-		batchSummary = result.BatchSummary
+		contextLines = lastNLines(batch.Lines, batchContextLines)
 
-		slog.Info("batch done",
-			"batch", batch.Number, "lines", len(batch.Lines), "summary", result.BatchSummary)
-
+		slog.Info("batch done", "batch", batch.Number, "lines", len(batch.Lines))
 		handler.OnBatchDone(batch.Number, batch.Lines)
 	}
 
-	allLines := make([]*Line, 0)
+	var allLines []*Line
 	for _, batch := range batches {
 		allLines = append(allLines, batch.Lines...)
 	}
-
 	handler.OnDone(allLines)
 }

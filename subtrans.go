@@ -100,8 +100,8 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 
 	// Set defaults, then apply options.
 	o := options{
-		maxBatchSize:          30,
-		batchSplitPunctuation: ".",
+		maxBatchSize:          translator.DefaultMaxBatchSize,
+		batchSplitPunctuation: translator.DefaultBatchSplitPunctuation,
 		stripPunctuation:      true,
 	}
 	for _, opt := range opts {
