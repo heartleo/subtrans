@@ -79,7 +79,9 @@ func (h *sseHandler) send(payload ssePayload) {
 		return
 	}
 
-	fmt.Fprintf(h.w, "data: %s\n\n", b)
+	if _, err := fmt.Fprintf(h.w, "data: %s\n\n", b); err != nil {
+		slog.Error("SSE write failed", "error", err)
+	}
 
 	if f, ok := h.w.(http.Flusher); ok {
 		f.Flush()

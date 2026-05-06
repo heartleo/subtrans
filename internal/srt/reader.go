@@ -19,7 +19,7 @@ var ErrInvalidSRT = errors.New("invalid SRT format")
 func Parse(content string) ([]*translator.Line, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return make([]*translator.Line, 0), nil
+		return nil, nil
 	}
 
 	blocks := splitBlocks(content)
@@ -49,7 +49,7 @@ func splitBlocks(content string) []string {
 	var blocks []string
 	var current strings.Builder
 
-	for _, rawLine := range strings.Split(content, "\n") {
+	for rawLine := range strings.SplitSeq(content, "\n") {
 		if strings.TrimSpace(rawLine) == "" {
 			if current.Len() > 0 {
 				blocks = append(blocks, current.String())

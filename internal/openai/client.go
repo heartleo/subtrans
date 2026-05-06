@@ -66,10 +66,9 @@ func (c *Client) Complete(ctx context.Context, messages []translator.Message) (s
 		Model:       c.model,
 		Messages:    apiMessages,
 		Temperature: float32(c.temperature),
-	}
-
-	req.ResponseFormat = &goopenai.ChatCompletionResponseFormat{
-		Type: goopenai.ChatCompletionResponseFormatTypeJSONObject,
+		ResponseFormat: &goopenai.ChatCompletionResponseFormat{
+			Type: goopenai.ChatCompletionResponseFormatTypeJSONObject,
+		},
 	}
 
 	// Count request tokens.

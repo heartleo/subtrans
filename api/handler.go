@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -53,13 +54,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	buf := make([]byte, 10<<20)
-	n, readErr := file.Read(buf)
-	if readErr != nil && n == 0 {
+	srtBytes, readErr := io.ReadAll(file)
+	if readErr != nil {
 		writeJSON(w, http.StatusBadRequest, "failed to read file: "+readErr.Error())
 		return
 	}
-	srtContent := string(buf[:n])
+	srtContent := string(srtBytes)
 
 	lines, parseErr := srt.Parse(srtContent)
 	if parseErr != nil {
