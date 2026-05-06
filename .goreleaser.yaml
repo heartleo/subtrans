@@ -2,25 +2,14 @@ version: 2
 
 project_name: subtrans
 
-builds:
-  - id: subtrans-cli
-    main: ./cmd/subtrans-cli
-    binary: subtrans-cli
-    goos:
-      - linux
-      - darwin
-      - windows
-    goarch:
-      - amd64
-      - arm64
-    ldflags:
-      - -s -w
-    env:
-      - CGO_ENABLED=0
+before:
+  hooks:
+    - go mod tidy
 
-  - id: subtrans-server
-    main: ./cmd/subtrans-server
-    binary: subtrans-server
+builds:
+  - id: subtrans
+    main: ./cmd/subtrans
+    binary: subtrans
     goos:
       - linux
       - darwin
@@ -29,7 +18,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
     env:
       - CGO_ENABLED=0
 
@@ -39,9 +28,11 @@ archives:
       - tar.gz
     name_template: >-
       {{ .ProjectName }}_
-      {{- .Tag }}_
+      {{- .Version }}_
       {{- .Os }}_
-      {{- .Arch }}
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
     format_overrides:
       - goos: windows
         formats:
@@ -52,11 +43,67 @@ archives:
       - .env.example
 
 checksum:
-  name_template: '{{ .ProjectName }}_{{ .Tag }}_checksums.txt'
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
   algorithm: sha256
 
 changelog:
-  use: github-native
+  sort: asc
+  groups:
+    - title: Bug Fixes
+      regexp: "^fix:"
+    - title: Features
+      regexp: "^feat:"
+    - title: Documentation
+      regexp: "^docs:"
+    - title: Other
+      order: 999
+  filters:
+    exclude:
+      - "^test:"
+      - "^ci:"
+      - "^style:"
+      - "^Merge "
+
+brews:
+  - name: subtrans
+    ids:
+      - default
+    repository:
+      owner: heartleo
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/heartleo/subtrans"
+    description: "Translate SRT subtitle files using OpenAI-compatible APIs"
+    license: "MIT"
+    install: |
+      bin.install "subtrans"
+    test: |
+      system "#{bin}/subtrans", "--version"
+
+winget:
+  - name: subtrans
+    package_identifier: heartleo.subtrans
+    publisher: heartleo
+    publisher_url: "https://github.com/heartleo"
+    homepage: "https://github.com/heartleo/subtrans"
+    short_description: "Translate SRT subtitle files using OpenAI-compatible APIs"
+    license: MIT
+    tags:
+      - subtitles
+      - translation
+      - srt
+      - openai
+      - cli
+    repository:
+      owner: heartleo
+      name: winget-pkgs
+      token: "{{ .Env.WINGET_GITHUB_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: microsoft
+          name: winget-pkgs
+          branch: master
 
 release:
   github:
@@ -68,11 +115,22 @@ release:
   footer: |
     ## Installation
 
-    ### Binary
-    Download the appropriate binary for your platform from the assets below.
+    ### Homebrew
+    ```bash
+    brew install heartleo/tap/subtrans
+    ```
+
+    ### winget
+    ```powershell
+    winget install heartleo.subtrans
+    ```
+
+    ### curl
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/heartleo/subtrans/main/install.sh | sh
+    ```
 
     ### Go Install
     ```bash
-    go install github.com/heartleo/subtrans/cmd/subtrans-cli@{{ .Tag }}
-    go install github.com/heartleo/subtrans/cmd/subtrans-server@{{ .Tag }}
+    go install github.com/heartleo/subtrans/cmd/subtrans@{{ .Tag }}
     ```
