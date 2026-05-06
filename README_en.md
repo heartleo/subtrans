@@ -2,15 +2,18 @@
 
 ***Translate SRT subtitles using OpenAI API***
 
-![Go Version](https://img.shields.io/badge/go-1.25+-blue.svg)
+![Go Version](https://img.shields.io/badge/go-1.25%2B-blue)
 [![Go Report Card](https://goreportcard.com/badge/github.com/heartleo/subtrans)](https://goreportcard.com/report/github.com/heartleo/subtrans)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/heartleo/subtrans/release.yml)](https://github.com/heartleo/subtrans/actions)
+[![Release](https://img.shields.io/github/v/release/heartleo/subtrans)](https://github.com/heartleo/subtrans/releases)
+[![Downloads](https://img.shields.io/github/downloads/heartleo/subtrans/total)](https://github.com/heartleo/subtrans/releases)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 [中文](README.md) | [English](README_en.md)
 
 ## Features
 
-- Translate `.srt` subtitle files to any [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639-1_codes) language
+- Translate `.srt` subtitle files
 - Works with any OpenAI-compatible API
 - Smart batch splitting by sentence boundaries
 - Automatic retry for missing translations
@@ -21,8 +24,37 @@
 
 ## Installation
 
+**Homebrew** (macOS / Linux):
+
 ```bash
-go install github.com/heartleo/subtrans/cmd/subtrans-cli@latest
+brew install heartleo/tap/subtrans
+```
+
+<!-- **winget** (Windows):
+
+```powershell
+winget install heartleo.subtrans
+```
+-->
+
+**curl** (macOS / Linux):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/heartleo/subtrans/main/install.sh | sh
+```
+
+**Go install** (requires Go 1.25+):
+
+```bash
+go install github.com/heartleo/subtrans/cmd/subtrans@latest
+```
+
+**Build from source:**
+
+```bash
+git clone https://github.com/heartleo/subtrans
+cd subtrans
+go build -o subtrans ./cmd/subtrans
 ```
 
 ## Quick Start
@@ -38,15 +70,15 @@ OPENAI_MODEL=gpt-4.1
 EOF
 
 # Translate to Chinese (default)
-subtrans-cli input.srt
+subtrans input.srt
 
 # Translate to French with custom output path
-subtrans-cli -l fr -o output.fr.srt input.srt
+subtrans -l fr -o output.fr.srt input.srt
 
 # Use a custom API base URL and model
 export OPENAI_BASE_URL=https://your-api.com/v1
 export OPENAI_MODEL=gpt-5.2
-subtrans-cli -l fr input.srt
+subtrans -l fr input.srt
 ```
 
 ### Go Library
@@ -88,19 +120,19 @@ func main() {
 
 ## Environment Variables
 
-| Variable               | Description    | Default                       |
-|------------------------|----------------|-------------------------------|
-| `OPENAI_API_KEY`       | API key        | -                             |
-| `OPENAI_BASE_URL`      | API base URL   | `https://api.openai.com/v1`   |
-| `OPENAI_MODEL`         | Model name     | `gpt-4.1`                     |
-| `OPENAI_TEMPERATURE`   | Temperature    | `0.0`                         |
-| `OPENAI_MAX_RETRIES`   | Max retries    | `3`                           |
+| Variable             | Description  | Default                     |
+| -------------------- | ------------ | --------------------------- |
+| `OPENAI_API_KEY`     | API key      | -                           |
+| `OPENAI_BASE_URL`    | API base URL | `https://api.openai.com/v1` |
+| `OPENAI_MODEL`       | Model name   | `gpt-4.1`                   |
+| `OPENAI_TEMPERATURE` | Temperature  | `0.0`                       |
+| `OPENAI_MAX_RETRIES` | Max retries  | `3`                         |
 
 ## Server API
 
 ```bash
 # Start server
-go run github.com/heartleo/subtrans/cmd/subtrans-server
+subtrans serve
 
 # Custom prompt
 curl -X POST http://localhost:8091/translate \
@@ -115,29 +147,43 @@ curl -X POST http://localhost:8091/translate \
   -F "language=zh"
 ```
 
-| Parameter      | Description              | Default |
-|----------------|--------------------------|---------|
-| `file`         | SRT file                 | -       |
-| `language`     | Target language ISO code | `zh`    |
-| `prompt`       | Custom user prompt       | -       |
-| `instructions` | Custom system instructions | -     |
+| Parameter      | Description                | Default |
+| -------------- | -------------------------- | ------- |
+| `file`         | SRT file                   | -       |
+| `language`     | Target language ISO code   | `zh`    |
+| `prompt`       | Custom user prompt         | -       |
+| `instructions` | Custom system instructions | -       |
 
 ## CLI Flags
 
-| Flag                    | Short  | Description              | Default              |
-|-------------------------|--------|--------------------------|----------------------|
-| `--language`            | `-l`   | Target language ISO code | `zh`                 |
-| `--output`              | `-o`   | Output file path         | `<input>.<lang>.srt` |
-| `--model`               | `-m`   | Model                    | -                    |
-| `--max-batch-size`      |        | Lines per batch          | `30`                 |
-| `--batch-split-punct`   |        | Punctuation for splitting| `.`                  |
-| `--instructions`        |        | Path to instructions file| -                    |
-| `--prompt`              |        | Custom user prompt       | -                    |
-| `--temperature`         |        | Temperature              | `0.0`                |
-| `--max-retries`         |        | API retry count          | `3`                  |
-| `--include-original`    |        | Include original text    | `false`              |
-| `--strip-punctuation`   |        | Strip trailing punctuation| `true`              |
-| `--verbose`             | `-v`   | Enable debug logging     | `false`              |
+Global flags (available on all subcommands):
+
+| Flag        | Short | Description          | Default |
+| ----------- | ----- | -------------------- | ------- |
+| `--verbose` | `-v`  | Enable debug logging | `false` |
+
+### subtrans
+
+| Flag                  | Short | Description                                                   | Default              |
+| --------------------- | ----- | ------------------------------------------------------------- | -------------------- |
+| `--language`          | `-l`  | Target language ISO code                                      | `zh`                 |
+| `--output`            | `-o`  | Output file path                                              | `<input>.<lang>.srt` |
+| `--model`             | `-m`  | Model                                                         | -                    |
+| `--max-batch-size`    |       | Lines per batch                                               | `30`                 |
+| `--batch-split-punct` |       | Punctuation for splitting                                     | `.`                  |
+| `--instructions`      |       | Path to instructions file                                     | -                    |
+| `--prompt`            |       | Custom user prompt                                            | -                    |
+| `--temperature`       |       | Temperature                                                   | `0.0`                |
+| `--max-retries`       |       | API retry count                                               | `3`                  |
+| `--include-original`  |       | Include original text in output                               | `false`              |
+| `--strip-punctuation` |       | Strip trailing punctuation from translation and original text | `true`               |
+
+### subtrans serve
+
+| Flag     | Short | Description | Default     |
+| -------- | ----- | ----------- | ----------- |
+| `--host` |       | Listen host | `localhost` |
+| `--port` | `-p`  | Listen port | `8091`      |
 
 ---
 
