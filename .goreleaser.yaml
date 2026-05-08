@@ -10,6 +10,8 @@ builds:
   - id: subtrans
     main: ./cmd/subtrans
     binary: subtrans
+    env:
+      - CGO_ENABLED=0
     goos:
       - linux
       - darwin
@@ -19,13 +21,17 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
-    env:
-      - CGO_ENABLED=0
 
 archives:
-  - id: default
+  - id: subtrans
+    ids:
+      - subtrans
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -33,41 +39,36 @@ archives:
       {{- if eq .Arch "amd64" }}x86_64
       {{- else if eq .Arch "386" }}i386
       {{- else }}{{ .Arch }}{{ end }}
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     files:
       - README.md
       - LICENSE
       - .env.example
 
 checksum:
-  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
-  algorithm: sha256
+  name_template: checksums.txt
 
 changelog:
   sort: asc
   groups:
     - title: Bug Fixes
-      regexp: "^fix:"
+      regexp: '^fix:'
     - title: Features
-      regexp: "^feat:"
+      regexp: '^feat:'
     - title: Documentation
-      regexp: "^docs:"
+      regexp: '^docs:'
     - title: Other
       order: 999
   filters:
     exclude:
-      - "^test:"
-      - "^ci:"
-      - "^style:"
-      - "^Merge "
+      - '^test:'
+      - '^ci:'
+      - '^style:'
+      - '^Merge '
 
 brews:
   - name: subtrans
     ids:
-      - default
+      - subtrans
     repository:
       owner: heartleo
       name: homebrew-tap
@@ -106,31 +107,5 @@ winget:
           branch: master
 
 release:
-  github:
-    owner: heartleo
-    name: subtrans
-  prerelease: auto
-  name_template: "{{.Tag}}"
   draft: true
-  footer: |
-    ## Installation
-
-    ### Homebrew
-    ```bash
-    brew install heartleo/tap/subtrans
-    ```
-
-    ### winget
-    ```powershell
-    winget install heartleo.subtrans
-    ```
-
-    ### curl
-    ```bash
-    curl -fsSL https://raw.githubusercontent.com/heartleo/subtrans/main/install.sh | sh
-    ```
-
-    ### Go Install
-    ```bash
-    go install github.com/heartleo/subtrans/cmd/subtrans@{{ .Tag }}
-    ```
+  replace_existing_draft: true
