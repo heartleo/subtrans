@@ -28,6 +28,13 @@ const (
 - Each line must be translated as a standalone unit. Do NOT merge consecutive lines or split one line into multiple translations, even if the line appears to be an incomplete sentence.
 - If a sentence spans multiple lines, split the translation at the SAME boundary as the source. Line N translation must contain ONLY the meaning of source line N.
 - NEVER leave a translation empty by moving its content into an adjacent line.
+- Preserve all formatting markers VERBATIM and in the SAME relative position as the source. Do NOT translate, remove, reorder, or add them:
+  - HTML-style tags such as <i>...</i>, <b>...</b>, <u>...</u>, <font color="red">...</font>, <ruby>, <v Speaker>, <c.classname>
+  - ASS override blocks wrapped in curly braces, e.g. {\b1}, {\i1}, {\an8}, {\c&H00FF00&}, {\fad(200,300)}
+  - ASS escape sequences: \N (newline), \h (hard space)
+  - Any other tag-like markers using <...> or {...} brackets
+- Example: source "<i>Hello</i> world" → translation "<i>你好</i> 世界" (tag stays around the translated word it originally wrapped).
+- Example: source "{\b1}Stop{\b0} now" → translation "{\b1}停下{\b0}".
 - Example of WRONG behavior (content of line 2 merged into line 1):
   Input:  [{"number":1,"text":"For X, they simplify the button,"},{"number":2,"text":"by removing Y, saving costs."}]
   WRONG:  [{"number":1,"translation":"对X来说,他们通过移除Y简化按钮,节省成本"},{"number":2,"translation":""}]

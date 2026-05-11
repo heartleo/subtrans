@@ -1,6 +1,6 @@
 # subtrans
 
-***Translate SRT subtitles using OpenAI API***
+***Translate subtitle files (SRT / VTT / ASS / LRC / SBV) using OpenAI API***
 
 ![Go Version](https://img.shields.io/badge/go-1.25%2B-blue)
 [![Go Report Card](https://goreportcard.com/badge/github.com/heartleo/subtrans)](https://goreportcard.com/report/github.com/heartleo/subtrans)
@@ -13,10 +13,10 @@
 
 ## Features
 
-- Translate `.srt` subtitle files
+- Multiple subtitle formats: **SRT**, **WebVTT**, **ASS/SSA**, **LRC**, **SBV**
 - Works with any OpenAI-compatible API
 - Smart batch splitting by sentence boundaries
-- Automatic retry for missing translations
+- Automatic retry for missing or merged translations
 - Customizable translation instructions and prompts
 - Bilingual output (original + translated text)
 - Use as a **CLI tool** or **Go library**
@@ -69,8 +69,11 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4.1
 EOF
 
-# Translate to Chinese (default)
+# Translate to Chinese (default; format auto-detected by extension)
 subtrans input.srt
+subtrans input.vtt
+subtrans lyrics.lrc
+subtrans anime.ass
 
 # Translate to French with custom output path
 subtrans -l fr -o output.fr.srt input.srt
@@ -106,17 +109,38 @@ func main() {
 		log.Fatal(err)
 	}
 
-	srtContent, err := os.ReadFile("input.srt")
+	subContent, err := os.ReadFile("input.srt")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	result, err := t.Translate(context.TODO(), string(srtContent), "zh")
+	result, err := t.Translate(context.TODO(), string(subContent), "zh")
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 ```
+
+For non-SRT formats, pass `WithFormat`:
+
+```go
+t.Translate(ctx, content, "zh", subtrans.WithFormat(subtrans.FormatVTT))
+t.Translate(ctx, content, "zh", subtrans.WithFormat(subtrans.FormatASS))
+
+// Or detect by filename
+f, _ := subtrans.DetectFormat("input.lrc")
+t.Translate(ctx, content, "zh", subtrans.WithFormat(f))
+```
+
+## Supported Formats
+
+| Format | Extension     | Supported |
+| ------ | ------------- | --------- |
+| SRT    | `.srt`        | ✅         |
+| VTT    | `.vtt`        | ✅         |
+| ASS    | `.ass`/`.ssa` | ✅         |
+| LRC    | `.lrc`        | ✅         |
+| SBV    | `.sbv`        | ✅         |
 
 ## Environment Variables
 
@@ -124,7 +148,7 @@ func main() {
 | -------------------- | ------------ | --------------------------- |
 | `OPENAI_API_KEY`     | API key      | -                           |
 | `OPENAI_BASE_URL`    | API base URL | `https://api.openai.com/v1` |
-| `OPENAI_MODEL`       | Model name   | `gpt-4.1`                   |
+| `OPENAI_MODEL`       | Model name   | `gpt-5.5`                   |
 | `OPENAI_TEMPERATURE` | Temperature  | `0.0`                       |
 | `OPENAI_MAX_RETRIES` | Max retries  | `3`                         |
 
@@ -140,6 +164,17 @@ curl -X POST http://localhost:8091/translate \
   -F "language=fr" \
   -F "prompt=your-prompt"
 
+# Upload a VTT/ASS/LRC/SBV file
+curl -X POST http://localhost:8091/translate \
+  -F "file=@anime.ass" \
+  -F "language=zh"
+
+# Specify format explicitly
+curl -X POST http://localhost:8091/translate \
+  -F "file=@noext_file" \
+  -F "format=vtt" \
+  -F "language=zh"
+
 # SSE streaming, returns results batch by batch
 curl -X POST http://localhost:8091/translate \
   -H "Accept: text/event-stream" \
@@ -147,12 +182,13 @@ curl -X POST http://localhost:8091/translate \
   -F "language=zh"
 ```
 
-| Parameter      | Description                | Default |
-| -------------- | -------------------------- | ------- |
-| `file`         | SRT file                   | -       |
-| `language`     | Target language ISO code   | `zh`    |
-| `prompt`       | Custom user prompt         | -       |
-| `instructions` | Custom system instructions | -       |
+| Parameter      | Description                                     | Default      |
+| -------------- | ----------------------------------------------- | ------------ |
+| `file`         | Subtitle file                                   | -            |
+| `format`       | Subtitle format (`srt`/`vtt`/`ass`/`lrc`/`sbv`) | by extension |
+| `language`     | Target language ISO code                        | `zh`         |
+| `prompt`       | Custom user prompt                              | -            |
+| `instructions` | Custom system instructions                      | -            |
 
 ## CLI Flags
 
@@ -164,19 +200,19 @@ Global flags (available on all subcommands):
 
 ### subtrans
 
-| Flag                  | Short | Description                                                   | Default              |
-| --------------------- | ----- | ------------------------------------------------------------- | -------------------- |
-| `--language`          | `-l`  | Target language ISO code                                      | `zh`                 |
-| `--output`            | `-o`  | Output file path                                              | `<input>.<lang>.srt` |
-| `--model`             | `-m`  | Model                                                         | -                    |
-| `--max-batch-size`    |       | Lines per batch                                               | `30`                 |
-| `--batch-split-punct` |       | Punctuation for splitting                                     | `.`                  |
-| `--instructions`      |       | Path to instructions file                                     | -                    |
-| `--prompt`            |       | Custom user prompt                                            | -                    |
-| `--temperature`       |       | Temperature                                                   | `0.0`                |
-| `--max-retries`       |       | API retry count                                               | `3`                  |
-| `--include-original`  |       | Include original text in output                               | `false`              |
-| `--strip-punctuation` |       | Strip trailing punctuation from translation and original text | `true`               |
+| Flag                  | Short | Description                                                   | Default                |
+| --------------------- | ----- | ------------------------------------------------------------- | ---------------------- |
+| `--language`          | `-l`  | Target language ISO code                                      | `zh`                   |
+| `--output`            | `-o`  | Output file path                                              | `<input>.<lang>.<ext>` |
+| `--model`             | `-m`  | Model                                                         | -                      |
+| `--max-batch-size`    |       | Lines per batch                                               | `30`                   |
+| `--batch-split-punct` |       | Punctuation for splitting                                     | `.`                    |
+| `--instructions`      |       | Path to instructions file                                     | -                      |
+| `--prompt`            |       | Custom user prompt                                            | -                      |
+| `--temperature`       |       | Temperature                                                   | `0.0`                  |
+| `--max-retries`       |       | API retry count                                               | `3`                    |
+| `--include-original`  |       | Include original text in output                               | `false`                |
+| `--strip-punctuation` |       | Strip trailing punctuation from translation and original text | `true`                 |
 
 ### subtrans serve
 

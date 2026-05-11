@@ -7,7 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/heartleo/subtrans/internal/srt"
+	"github.com/heartleo/subtrans/internal/subtitle"
+	"github.com/heartleo/subtrans/internal/subtitle/srt"
 	"github.com/heartleo/subtrans/internal/translator"
 )
 
@@ -29,7 +30,9 @@ type ssePayload struct {
 // sseHandler implements translator.TranslationHandler for SSE streaming.
 type sseHandler struct {
 	w       http.ResponseWriter
-	fmtOpts srt.FormatOptions
+	codec   subtitle.Codec
+	doc     *subtitle.Document
+	fmtOpts subtitle.FormatOptions
 }
 
 func (h *sseHandler) OnBatchDone(batch int, lines []*translator.Line) {
@@ -64,10 +67,10 @@ func (h *sseHandler) OnError(batch int, err error) {
 	h.send(payload)
 }
 
-func (h *sseHandler) OnDone(lines []*translator.Line) {
+func (h *sseHandler) OnDone(_ []*translator.Line) {
 	payload := ssePayload{
 		Event: "done",
-		SRT:   srt.Format(lines, h.fmtOpts),
+		SRT:   h.codec.Format(h.doc, h.fmtOpts),
 	}
 	h.send(payload)
 }

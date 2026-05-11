@@ -1,25 +1,31 @@
-// Package srt handles reading and writing SRT subtitle files.
+// Package srt implements the SRT subtitle codec.
 package srt
 
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/heartleo/subtrans/internal/subtitle"
 	"github.com/heartleo/subtrans/internal/translator"
 )
 
 // ErrInvalidSRT is returned when the SRT content cannot be parsed.
 var ErrInvalidSRT = errors.New("invalid SRT format")
 
+// Codec implements subtitle.Codec for SRT.
+type Codec struct{}
+
+func init() { subtitle.Register(subtitle.FormatSRT, Codec{}) }
+
 // Parse parses an SRT string and returns the subtitle lines.
-// Input must be UTF-8 encoded. Returns an empty slice for empty input.
-func Parse(content string) ([]*translator.Line, error) {
+func (Codec) Parse(content string) (*subtitle.Document, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
-		return nil, nil
+		return &subtitle.Document{}, nil
 	}
 
 	blocks := splitBlocks(content)
@@ -39,7 +45,47 @@ func Parse(content string) ([]*translator.Line, error) {
 		lines = append(lines, line)
 	}
 
-	return lines, nil
+	return &subtitle.Document{Lines: lines}, nil
+}
+
+// Format renders the document to SRT.
+func (Codec) Format(doc *subtitle.Document, opts subtitle.FormatOptions) string {
+	var b strings.Builder
+	number := 1
+
+	for _, line := range doc.Lines {
+		if line.Translation == "" {
+			slog.Warn("skipping line with empty translation in SRT output", "line", line.Number)
+			continue
+		}
+
+		translation := line.Translation
+		if opts.StripTrailingPunctuation {
+			translation = subtitle.StripTrailing(translation)
+		}
+
+		b.WriteString(strconv.Itoa(number))
+		b.WriteByte('\n')
+		b.WriteString(FormatTimestamp(line.Start))
+		b.WriteString(" --> ")
+		b.WriteString(FormatTimestamp(line.End))
+		b.WriteByte('\n')
+
+		if opts.IncludeOriginal && line.Text != "" {
+			original := line.Text
+			if opts.StripTrailingPunctuation {
+				original = subtitle.StripTrailing(original)
+			}
+			b.WriteString(original)
+			b.WriteByte('\n')
+		}
+
+		b.WriteString(translation)
+		b.WriteString("\n\n")
+		number++
+	}
+
+	return b.String()
 }
 
 func splitBlocks(content string) []string {
@@ -81,7 +127,7 @@ func parseBlock(block string) (*translator.Line, error) {
 
 	number, err := strconv.Atoi(strings.TrimSpace(rows[0]))
 	if err != nil {
-		return nil, fmt.Errorf("invalid subtitle number %q: %v", rows[0], err)
+		return nil, fmt.Errorf("invalid subtitle number %q: %w", rows[0], err)
 	}
 
 	start, end, err := parseTimestampLine(strings.TrimSpace(rows[1]))
@@ -110,12 +156,12 @@ func parseTimestampLine(s string) (time.Duration, time.Duration, error) {
 
 	start, err := parseTimestamp(strings.TrimSpace(parts[0]))
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid start timestamp: %v", err)
+		return 0, 0, fmt.Errorf("invalid start timestamp: %w", err)
 	}
 
 	end, err := parseTimestamp(strings.TrimSpace(parts[1]))
 	if err != nil {
-		return 0, 0, fmt.Errorf("invalid end timestamp: %v", err)
+		return 0, 0, fmt.Errorf("invalid end timestamp: %w", err)
 	}
 
 	return start, end, nil
@@ -131,7 +177,7 @@ func parseTimestamp(s string) (time.Duration, error) {
 
 	hours, err := strconv.Atoi(parts[0])
 	if err != nil || hours < 0 {
-		return 0, fmt.Errorf("hours in %q: %v", s, err)
+		return 0, fmt.Errorf("hours in %q: %w", s, err)
 	}
 
 	minutes, err := strconv.Atoi(parts[1])
@@ -161,4 +207,14 @@ func parseTimestamp(s string) (time.Duration, error) {
 		time.Duration(minutes)*time.Minute +
 		time.Duration(seconds)*time.Second +
 		time.Duration(ms)*time.Millisecond, nil
+}
+
+// FormatTimestamp formats a time.Duration as an SRT timestamp: HH:MM:SS,mmm.
+func FormatTimestamp(d time.Duration) string {
+	h := int(d.Hours())
+	m := int(d.Minutes()) % 60
+	s := int(d.Seconds()) % 60
+	ms := int(d.Milliseconds()) % 1000
+
+	return fmt.Sprintf("%02d:%02d:%02d,%03d", h, m, s, ms)
 }

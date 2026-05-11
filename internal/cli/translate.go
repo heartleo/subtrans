@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/heartleo/subtrans/internal/config"
 	"github.com/heartleo/subtrans/internal/openai"
-	"github.com/heartleo/subtrans/internal/srt"
+	"github.com/heartleo/subtrans/internal/subtitle"
+	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register codecs
 	"github.com/heartleo/subtrans/internal/translator"
 )
 
@@ -38,9 +40,18 @@ func runTranslate(inputPath string) error {
 		return fmt.Errorf("config: %w", err)
 	}
 
+	format, err := subtitle.DetectByExt(inputPath)
+	if err != nil {
+		return fmt.Errorf("detect format: %w", err)
+	}
+	codec, err := subtitle.For(format)
+	if err != nil {
+		return fmt.Errorf("codec: %w", err)
+	}
+
 	outputPath := translateOutput
 	if outputPath == "" {
-		outputPath = deriveOutputPath(inputPath, translateLanguage)
+		outputPath = deriveOutputPath(inputPath, translateLanguage, format)
 	}
 
 	fileBytes, err := os.ReadFile(inputPath) // #nosec G304 -- user-supplied path is intentional
@@ -48,9 +59,9 @@ func runTranslate(inputPath string) error {
 		return fmt.Errorf("read input: %w", err)
 	}
 
-	lines, err := srt.Parse(string(fileBytes))
+	doc, err := codec.Parse(string(fileBytes))
 	if err != nil {
-		return fmt.Errorf("parse SRT: %w", err)
+		return fmt.Errorf("parse subtitle: %w", err)
 	}
 
 	opts := translator.DefaultOptions()
@@ -70,10 +81,12 @@ func runTranslate(inputPath string) error {
 		opts.Instructions = string(b)
 	}
 
-	batches := translator.BatchLines(lines, opts)
+	batches := translator.BatchLines(doc.Lines, opts)
 	handler := &cliHandler{
 		outputPath: outputPath,
-		fmtOpts: srt.FormatOptions{
+		codec:      codec,
+		doc:        doc,
+		fmtOpts: subtitle.FormatOptions{
 			IncludeOriginal:          translateIncludeOriginal,
 			StripTrailingPunctuation: translateStripPunctuation,
 		},
@@ -84,26 +97,32 @@ func runTranslate(inputPath string) error {
 	return nil
 }
 
-func deriveOutputPath(input, lang string) string {
-	if i := strings.LastIndex(input, "."); i >= 0 {
-		return input[:i] + "." + strings.ToLower(strings.ReplaceAll(lang, " ", "_")) + ".srt"
+func deriveOutputPath(input, lang string, format subtitle.Format) string {
+	ext := filepath.Ext(input)
+	stem := strings.TrimSuffix(input, ext)
+	langSuffix := strings.ToLower(strings.ReplaceAll(lang, " ", "_"))
+	outExt := ext
+	if outExt == "" {
+		outExt = "." + string(format)
 	}
-	return input + ".translated.srt"
+	return stem + "." + langSuffix + outExt
 }
 
 type cliHandler struct {
 	translator.BaseHandler
 	outputPath string
-	fmtOpts    srt.FormatOptions
+	codec      subtitle.Codec
+	doc        *subtitle.Document
+	fmtOpts    subtitle.FormatOptions
 }
 
 func (h *cliHandler) OnBatchDone(batch int, lines []*translator.Line) {
 	_, _ = fmt.Fprintf(os.Stderr, "Batch %d: %d lines translated\n", batch, len(lines))
 }
 
-func (h *cliHandler) OnDone(lines []*translator.Line) {
-	srtOutput := srt.Format(lines, h.fmtOpts)
-	if err := os.WriteFile(h.outputPath, []byte(srtOutput), 0o600); err != nil {
+func (h *cliHandler) OnDone(_ []*translator.Line) {
+	output := h.codec.Format(h.doc, h.fmtOpts)
+	if err := os.WriteFile(h.outputPath, []byte(output), 0o600); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Failed to write output: %v\n", err)
 	} else {
 		_, _ = fmt.Fprintf(os.Stderr, "Saved to %s\n", h.outputPath)

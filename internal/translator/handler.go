@@ -21,4 +21,4 @@ type BaseHandler struct{}
 
 func (BaseHandler) OnBatchDone(_ int, _ []*Line) {}
 func (BaseHandler) OnError(_ int, _ error)       {}
-func (BaseHandler) OnDone(_ []*Line)              {}
+func (BaseHandler) OnDone(_ []*Line)             {}

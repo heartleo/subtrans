@@ -10,6 +10,10 @@ type Line struct {
 	End         time.Duration
 	Text        string
 	Translation string // filled in-place by the translator after parsing
+	// Metadata is codec-private per-line state captured during Parse and
+	// consumed during Format (e.g. ASS Dialogue non-text fields). The
+	// translator pipeline does not inspect or mutate this field.
+	Metadata any
 }
 
 // Batch is a group of lines sent in a single API call.

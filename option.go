@@ -1,5 +1,7 @@
 package subtrans
 
+import "github.com/heartleo/subtrans/internal/subtitle"
+
 // Option configures translation behavior.
 // Use the With* functions to create options.
 type Option interface {
@@ -14,7 +16,17 @@ type options struct {
 	batchSplitPunctuation string
 	includeOriginal       bool
 	stripPunctuation      bool
+	format                subtitle.Format
 }
+
+// formatOption selects the subtitle codec.
+type formatOption subtitle.Format
+
+func (o formatOption) apply(opts *options) { opts.format = subtitle.Format(o) }
+
+// WithFormat selects the subtitle codec (default: [subtitle.FormatSRT]).
+// Use [subtitle.DetectByExt] to infer the value from a filename.
+func WithFormat(f subtitle.Format) Option { return formatOption(f) }
 
 // instructionsOption sets custom system instructions.
 type instructionsOption string

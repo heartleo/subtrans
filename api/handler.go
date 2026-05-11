@@ -8,7 +8,8 @@ import (
 	"strings"
 
 	"github.com/heartleo/subtrans/internal/config"
-	"github.com/heartleo/subtrans/internal/srt"
+	"github.com/heartleo/subtrans/internal/subtitle"
+	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register codecs
 	"github.com/heartleo/subtrans/internal/translator"
 )
 
@@ -42,7 +43,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		language = translator.DefaultOptions().TargetLanguage
 	}
 
-	file, _, err := r.FormFile("file")
+	file, fileHeader, err := r.FormFile("file")
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, "file is required")
 		return
@@ -54,16 +55,30 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	srtBytes, readErr := io.ReadAll(file)
+	contentBytes, readErr := io.ReadAll(file)
 	if readErr != nil {
 		writeJSON(w, http.StatusBadRequest, "failed to read file: "+readErr.Error())
 		return
 	}
-	srtContent := string(srtBytes)
+	content := string(contentBytes)
 
-	lines, parseErr := srt.Parse(srtContent)
+	format := subtitle.FormatSRT
+	if formStr := r.FormValue("format"); formStr != "" {
+		format = subtitle.Format(formStr)
+	} else if fileHeader != nil {
+		if f, err := subtitle.DetectByExt(fileHeader.Filename); err == nil {
+			format = f
+		}
+	}
+	codec, err := subtitle.For(format)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	doc, parseErr := codec.Parse(content)
 	if parseErr != nil {
-		writeJSON(w, http.StatusBadRequest, "invalid SRT: "+parseErr.Error())
+		writeJSON(w, http.StatusBadRequest, "invalid subtitle: "+parseErr.Error())
 		return
 	}
 
@@ -72,50 +87,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	opts.Prompt = r.FormValue("prompt")
 	opts.Instructions = r.FormValue("instructions")
 
-	batches := translator.BatchLines(lines, opts)
-	fmtOpts := srt.FormatOptions{
+	batches := translator.BatchLines(doc.Lines, opts)
+	fmtOpts := subtitle.FormatOptions{
 		IncludeOriginal:          opts.IncludeOriginal,
 		StripTrailingPunctuation: opts.StripTrailingPunctuation,
 	}
 
 	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
-		h.serveSSE(w, r, batches, opts, fmtOpts)
+		h.serveSSE(w, r, batches, opts, codec, doc, fmtOpts)
 	} else {
-		h.servePlain(w, r, batches, opts, fmtOpts)
+		h.servePlain(w, r, batches, opts, codec, doc, fmtOpts)
 	}
 }
 
-// servePlain runs translation synchronously and returns the SRT text directly.
-func (h *Handler) servePlain(w http.ResponseWriter, r *http.Request, batches []*translator.Batch, opts translator.Options, fmtOpts srt.FormatOptions) {
+// servePlain runs translation synchronously and returns subtitle text directly.
+func (h *Handler) servePlain(w http.ResponseWriter, r *http.Request, batches []*translator.Batch, opts translator.Options, codec subtitle.Codec, doc *subtitle.Document, fmtOpts subtitle.FormatOptions) {
 	if err := translator.Translate(r.Context(), batches, opts, h.completer, translator.BaseHandler{}); err != nil {
 		writeJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	allLines := collectLines(batches)
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(srt.Format(allLines, fmtOpts)))
+	_, _ = w.Write([]byte(codec.Format(doc, fmtOpts))) // #nosec G705 -- text/plain subtitle output, not HTML
 }
 
 // serveSSE streams translation progress as Server-Sent Events.
-func (h *Handler) serveSSE(w http.ResponseWriter, r *http.Request, batches []*translator.Batch, opts translator.Options, fmtOpts srt.FormatOptions) {
+func (h *Handler) serveSSE(w http.ResponseWriter, r *http.Request, batches []*translator.Batch, opts translator.Options, codec subtitle.Codec, doc *subtitle.Document, fmtOpts subtitle.FormatOptions) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	sh := &sseHandler{w: w, fmtOpts: fmtOpts}
+	sh := &sseHandler{w: w, codec: codec, doc: doc, fmtOpts: fmtOpts}
 	// Errors are streamed to the client via sseHandler.OnError.
 	_ = translator.Translate(r.Context(), batches, opts, h.completer, sh)
-}
-
-func collectLines(batches []*translator.Batch) []*translator.Line {
-	var lines []*translator.Line
-	for _, batch := range batches {
-		lines = append(lines, batch.Lines...)
-	}
-	return lines
 }
 
 func writeJSON(w http.ResponseWriter, code int, msg string) {
@@ -132,4 +138,3 @@ func writeJSON(w http.ResponseWriter, code int, msg string) {
 
 	_, _ = w.Write(b)
 }
-

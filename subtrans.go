@@ -25,7 +25,8 @@ import (
 
 	"github.com/heartleo/subtrans/internal/config"
 	"github.com/heartleo/subtrans/internal/openai"
-	"github.com/heartleo/subtrans/internal/srt"
+	"github.com/heartleo/subtrans/internal/subtitle"
+	_ "github.com/heartleo/subtrans/internal/subtitle/all" // register all codecs
 	"github.com/heartleo/subtrans/internal/translator"
 )
 
@@ -116,9 +117,18 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		opt.apply(&o)
 	}
 
-	lines, err := srt.Parse(srtContent)
+	format := o.format
+	if format == "" {
+		format = subtitle.FormatSRT
+	}
+	codec, err := subtitle.For(format)
 	if err != nil {
-		return nil, fmt.Errorf("parse SRT: %w", err)
+		return nil, fmt.Errorf("subtrans: %w", err)
+	}
+
+	doc, err := codec.Parse(srtContent)
+	if err != nil {
+		return nil, fmt.Errorf("parse subtitle: %w", err)
 	}
 
 	ops := translator.Options{
@@ -131,32 +141,20 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		StripTrailingPunctuation: o.stripPunctuation,
 	}
 
-	batches := translator.BatchLines(lines, ops)
+	batches := translator.BatchLines(doc.Lines, ops)
 
-	collector := &collectHandler{}
-	if err := translator.Translate(ctx, batches, ops, t.client, collector); err != nil {
+	if err := translator.Translate(ctx, batches, ops, t.client, translator.BaseHandler{}); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTranslationIncomplete, err)
 	}
 
-	srtOutput := srt.Format(collector.lines, srt.FormatOptions{
+	output := codec.Format(doc, subtitle.FormatOptions{
 		IncludeOriginal:          o.includeOriginal,
 		StripTrailingPunctuation: o.stripPunctuation,
 	})
 
 	return &Result{
-		SRT:        srtOutput,
-		LineCount:  len(collector.lines),
+		SRT:        output,
+		LineCount:  len(doc.Lines),
 		BatchCount: len(batches),
 	}, nil
-}
-
-// collectHandler implements translator.TranslationHandler to capture the
-// final line set delivered to OnDone.
-type collectHandler struct {
-	translator.BaseHandler
-	lines []*translator.Line
-}
-
-func (h *collectHandler) OnDone(lines []*translator.Line) {
-	h.lines = lines
 }
