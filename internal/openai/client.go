@@ -18,8 +18,7 @@ import (
 // ErrMaxRetriesExceeded is returned when all retry attempts are exhausted.
 var ErrMaxRetriesExceeded = errors.New("max retries exceeded")
 
-// ClientOption configures a Client.
-type ClientOption func(*Client)
+const defaultInitialBackoff = 5 * time.Second
 
 // Client wraps the OpenAI SDK client with retry logic.
 type Client struct {
@@ -31,7 +30,7 @@ type Client struct {
 }
 
 // NewClient creates a new Client from the given config.
-func NewClient(cfg config.Config, opts ...ClientOption) *Client {
+func NewClient(cfg config.Config) *Client {
 	clientCfg := goopenai.DefaultConfig(cfg.APIKey)
 	if cfg.BaseURL != "" {
 		clientCfg.BaseURL = cfg.BaseURL
@@ -42,11 +41,7 @@ func NewClient(cfg config.Config, opts ...ClientOption) *Client {
 		model:          cfg.Model,
 		temperature:    cfg.Temperature,
 		maxRetries:     cfg.MaxRetries,
-		initialBackoff: 5 * time.Second,
-	}
-
-	for _, opt := range opts {
-		opt(c)
+		initialBackoff: defaultInitialBackoff,
 	}
 
 	slog.Info("openai client initialized", "model", c.model, "base_url", clientCfg.BaseURL)
@@ -71,10 +66,12 @@ func (c *Client) Complete(ctx context.Context, messages []translator.Message) (s
 		},
 	}
 
-	// Count request tokens.
-	var reqTokens int
-	for _, m := range messages {
-		reqTokens += countTokens(c.model, m.Content)
+	enc, tokOK := tokenizerForModel(c.model)
+	reqTokens := 0
+	if tokOK {
+		for _, m := range messages {
+			reqTokens += countTokens(enc, m.Content)
+		}
 	}
 
 	backoff := c.initialBackoff
@@ -87,8 +84,13 @@ func (c *Client) Complete(ctx context.Context, messages []translator.Message) (s
 			}
 
 			content := resp.Choices[0].Message.Content
-			respTokens := countTokens(c.model, content)
-			slog.Info("token usage", "request_tokens", reqTokens, "response_tokens", respTokens, "total_tokens", reqTokens+respTokens)
+			if tokOK {
+				respTokens := countTokens(enc, content)
+				slog.Info("token usage",
+					"request_tokens", reqTokens,
+					"response_tokens", respTokens,
+					"total_tokens", reqTokens+respTokens)
+			}
 
 			return content, nil
 		}
@@ -97,14 +99,12 @@ func (c *Client) Complete(ctx context.Context, messages []translator.Message) (s
 		if errors.As(err, &apiErr) && isRetryable(apiErr.HTTPStatusCode) && attempt < c.maxRetries {
 			slog.Warn("API error, retrying", "status", apiErr.HTTPStatusCode, "attempt", attempt+1)
 
-			if backoff > 0 {
-				select {
-				case <-ctx.Done():
-					return "", fmt.Errorf("context cancelled: %w", ctx.Err())
-				case <-time.After(backoff):
-					backoff *= 2
-				}
+			select {
+			case <-ctx.Done():
+				return "", fmt.Errorf("context cancelled: %w", ctx.Err())
+			case <-time.After(backoff):
 			}
+			backoff *= 2
 
 			continue
 		}
@@ -119,13 +119,18 @@ func isRetryable(code int) bool {
 	return code == 429 || (code >= 500 && code < 600)
 }
 
-// countTokens returns the token count for the given text using the model's tokenizer.
-// Returns 0 if the model is not supported or counting fails.
-func countTokens(model string, text string) int {
+// tokenizerForModel resolves an encoder for model. The bool is false when the
+// model has no supported tokenizer, signalling callers to skip token logging.
+func tokenizerForModel(model string) (tokenizer.Codec, bool) {
 	enc, err := tokenizer.ForModel(tokenizer.Model(model))
 	if err != nil {
-		return 0
+		return nil, false
 	}
+	return enc, true
+}
+
+// countTokens returns the token count for text. Returns 0 on encoder failure.
+func countTokens(enc tokenizer.Codec, text string) int {
 	count, err := enc.Count(text)
 	if err != nil {
 		return 0

@@ -19,6 +19,6 @@ type TranslationHandler interface {
 // Embed it to only override the methods you care about.
 type BaseHandler struct{}
 
-func (BaseHandler) OnBatchDone(int, []*Line) {}
-func (BaseHandler) OnError(int, error)       {}
-func (BaseHandler) OnDone([]*Line)           {}
+func (BaseHandler) OnBatchDone(_ int, _ []*Line) {}
+func (BaseHandler) OnError(_ int, _ error)       {}
+func (BaseHandler) OnDone(_ []*Line)              {}

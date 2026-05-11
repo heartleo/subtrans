@@ -78,7 +78,9 @@ func runTranslate(inputPath string) error {
 			StripTrailingPunctuation: translateStripPunctuation,
 		},
 	}
-	translator.Translate(context.Background(), batches, opts, openai.NewClient(cfg), handler)
+	if err := translator.Translate(context.Background(), batches, opts, openai.NewClient(cfg), handler); err != nil {
+		return fmt.Errorf("translate: %w", err)
+	}
 	return nil
 }
 
@@ -90,20 +92,13 @@ func deriveOutputPath(input, lang string) string {
 }
 
 type cliHandler struct {
+	translator.BaseHandler
 	outputPath string
 	fmtOpts    srt.FormatOptions
 }
 
 func (h *cliHandler) OnBatchDone(batch int, lines []*translator.Line) {
 	_, _ = fmt.Fprintf(os.Stderr, "Batch %d: %d lines translated\n", batch, len(lines))
-}
-
-func (h *cliHandler) OnError(batch int, err error) {
-	if batch > 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "error (batch %d): %v\n", batch, err)
-	} else {
-		_, _ = fmt.Fprintf(os.Stderr, "error: %v\n", err)
-	}
 }
 
 func (h *cliHandler) OnDone(lines []*translator.Line) {

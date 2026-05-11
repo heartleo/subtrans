@@ -1,6 +1,9 @@
 package translator
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // BatchLines divides lines into batches of approximately opts.MaxBatchSize.
 // A batch boundary is placed after a line whose text ends with one of the
@@ -45,12 +48,16 @@ func BatchLines(lines []*Line, opts Options) []*Batch {
 	return batches
 }
 
-// endsWithPunctuation reports whether text ends with any character in punctuation.
+// endsWithPunctuation reports whether text ends with any rune in punctuation.
+// Rune-based so multi-byte characters (e.g. CJK fullwidth ， 。) match correctly.
 func endsWithPunctuation(text string, p string) bool {
 	t := strings.TrimRight(text, " \t\r\n")
 	if t == "" {
 		return false
 	}
-	lastChar := t[len(t)-1:]
-	return strings.ContainsAny(lastChar, p)
+	last, _ := utf8.DecodeLastRuneInString(t)
+	if last == utf8.RuneError {
+		return false
+	}
+	return strings.ContainsRune(p, last)
 }

@@ -33,7 +33,7 @@ func Parse(content string) ([]*translator.Line, error) {
 
 		line, err := parseBlock(block)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrInvalidSRT, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidSRT, err)
 		}
 
 		lines = append(lines, line)
@@ -130,27 +130,30 @@ func parseTimestamp(s string) (time.Duration, error) {
 	}
 
 	hours, err := strconv.Atoi(parts[0])
-	if err != nil {
+	if err != nil || hours < 0 {
 		return 0, fmt.Errorf("hours in %q: %v", s, err)
 	}
 
 	minutes, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, fmt.Errorf("minutes in %q: %v", s, err)
+	if err != nil || minutes < 0 || minutes >= 60 {
+		return 0, fmt.Errorf("minutes out of range in %q", s)
 	}
 
 	secParts := strings.SplitN(parts[2], ".", 2)
 
 	seconds, err := strconv.Atoi(secParts[0])
-	if err != nil {
-		return 0, fmt.Errorf("seconds in %q: %v", s, err)
+	if err != nil || seconds < 0 || seconds >= 60 {
+		return 0, fmt.Errorf("seconds out of range in %q", s)
 	}
 
 	ms := 0
 	if len(secParts) == 2 {
+		if len(secParts[1]) != 3 {
+			return 0, fmt.Errorf("milliseconds must be 3 digits in %q", s)
+		}
 		ms, err = strconv.Atoi(secParts[1])
-		if err != nil {
-			return 0, fmt.Errorf("milliseconds in %q: %v", s, err)
+		if err != nil || ms < 0 || ms >= 1000 {
+			return 0, fmt.Errorf("milliseconds out of range in %q", s)
 		}
 	}
 

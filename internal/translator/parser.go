@@ -6,7 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 )
+
+// mergedLineRuneRatio is the rune-length ratio above which a translation is
+// suspected of having absorbed an adjacent line's content (when the neighbour
+// is empty). Rune-based to handle multi-byte scripts (e.g. CJK) correctly.
+const mergedLineRuneRatio = 3
 
 // ErrNoMatches is returned when no translation entries can be extracted.
 var ErrNoMatches = errors.New("no translation entries found in response")
@@ -44,27 +50,44 @@ func ParseResponse(raw string, lines []*Line) (ParseResult, error) {
 		return ParseResult{}, ErrNoMatches
 	}
 
-	// seq number (1-based) → translation text
-	seqMap := make(map[int]string, len(resp.Translations))
+	// seq number (1-based) → trimmed translation text.
+	trimmed := make(map[int]string, len(resp.Translations))
 	for _, e := range resp.Translations {
-		seqMap[e.Number] = e.Translation
+		trimmed[e.Number] = strings.TrimSpace(e.Translation)
 	}
 
 	var missing []int
+	missingSet := make(map[int]bool, len(lines))
+	markMissing := func(n int) {
+		if missingSet[n] {
+			return
+		}
+		missingSet[n] = true
+		missing = append(missing, n)
+	}
+
 	for i, line := range lines {
 		seqNum := i + 1
-		t, ok := seqMap[seqNum]
-		if !ok {
-			missing = append(missing, line.Number)
+		t := trimmed[seqNum]
+		if t == "" {
+			slog.Warn("missing or empty translation for line", "line", line.Number)
+			markMissing(line.Number)
 			continue
 		}
-		trimmed := strings.TrimSpace(t)
-		if trimmed == "" {
-			slog.Warn("empty translation for line", "line", line.Number)
-			missing = append(missing, line.Number)
-		} else {
-			line.Translation = trimmed
+		// Detect merge: current translation disproportionately long AND
+		// next line's translation empty → content likely absorbed.
+		srcRunes := utf8.RuneCountInString(line.Text)
+		transRunes := utf8.RuneCountInString(t)
+		if i+1 < len(lines) && trimmed[seqNum+1] == "" && srcRunes > 0 &&
+			transRunes > srcRunes*mergedLineRuneRatio {
+			slog.Warn("suspected merged translation; retrying both lines",
+				"line", line.Number, "next", lines[i+1].Number,
+				"src_runes", srcRunes, "trans_runes", transRunes)
+			markMissing(line.Number)
+			markMissing(lines[i+1].Number)
+			continue
 		}
+		line.Translation = t
 	}
 
 	return ParseResult{Missing: missing}, nil

@@ -3,6 +3,7 @@ package translator
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -11,8 +12,32 @@ const (
 	batchContextLines = 3
 )
 
-// mustMarshal marshals v to JSON. Panics if v contains unmarshalable types
-// (channels, funcs). Safe for structs with only basic field types.
+const (
+	systemIntroTmpl  = "You are a professional subtitle translator. Translate the subtitles into %s.\n"
+	systemStyleRules = `Preserve the original meaning, tone, and style. Use natural, fluent expressions in the target language. Do not add or remove content.` + "\n\n"
+	systemJSONFormat = `You MUST respond in the following JSON format:
+{
+  "translations": [
+    {"number": 1, "translation": "translated text here"},
+    {"number": 2, "translation": "translated text here"}
+  ]
+}` + "\n\n"
+	systemRules = `Rules:
+- Output valid JSON only. No markdown, no extra text.
+- Translate EVERY input line. The output array length MUST equal the input array length.
+- Each line must be translated as a standalone unit. Do NOT merge consecutive lines or split one line into multiple translations, even if the line appears to be an incomplete sentence.
+- If a sentence spans multiple lines, split the translation at the SAME boundary as the source. Line N translation must contain ONLY the meaning of source line N.
+- NEVER leave a translation empty by moving its content into an adjacent line.
+- Example of WRONG behavior (content of line 2 merged into line 1):
+  Input:  [{"number":1,"text":"For X, they simplify the button,"},{"number":2,"text":"by removing Y, saving costs."}]
+  WRONG:  [{"number":1,"translation":"对X来说,他们通过移除Y简化按钮,节省成本"},{"number":2,"translation":""}]
+  RIGHT:  [{"number":1,"translation":"对X来说,他们简化了按钮,"},{"number":2,"translation":"通过移除Y,节省了成本。"}]
+- The "number" field must match the input number exactly.` + "\n"
+	retryInstructionTmpl = "Some lines were not translated. Translate ONLY lines numbered: %s\n"
+	retryContextNote     = `Lines that already have a "translation" field are context only — do NOT re-translate them.` + "\n\n"
+	batchContextHeader   = "Context from previous batch (do not retranslate):\n"
+)
+
 func mustMarshal(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -85,14 +110,14 @@ func BuildRetryPrompt(batchLines []*Line, missingNums []int, opts Options) ([]Me
 		if !missingSet[l.Number] && l.Translation != "" {
 			entry.Translation = l.Translation // context-only line
 		} else {
-			missingSeqNums = append(missingSeqNums, fmt.Sprintf("%d", seqNum))
+			missingSeqNums = append(missingSeqNums, strconv.Itoa(seqNum))
 		}
 		input[i] = entry
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "Some lines were not translated. Translate ONLY lines numbered: %s\n", strings.Join(missingSeqNums, ", "))
-	b.WriteString("Lines that already have a \"translation\" field are context only — do NOT re-translate them.\n\n")
+	fmt.Fprintf(&b, retryInstructionTmpl, strings.Join(missingSeqNums, ", "))
+	b.WriteString(retryContextNote)
 	b.Write(mustMarshal(input))
 
 	messages := []Message{
@@ -107,22 +132,10 @@ func buildSystemMessage(opts Options) string {
 
 	if opts.TargetLanguage != "" {
 		langName := ResolveLanguage(opts.TargetLanguage)
-		fmt.Fprintf(&b, "You are a professional subtitle translator. Translate the subtitles into %s.\n", langName)
-		b.WriteString("Preserve the original meaning, tone, and style. ")
-		b.WriteString("Use natural, fluent expressions in the target language. ")
-		b.WriteString("Do not add or remove content.\n\n")
-		b.WriteString("You MUST respond in the following JSON format:\n")
-		b.WriteString("{\n")
-		b.WriteString("  \"translations\": [\n")
-		b.WriteString("    {\"number\": 1, \"translation\": \"translated text here\"},\n")
-		b.WriteString("    {\"number\": 2, \"translation\": \"translated text here\"}\n")
-		b.WriteString("  ]\n")
-		b.WriteString("}\n\n")
-		b.WriteString("Rules:\n")
-		b.WriteString("- Output valid JSON only. No markdown, no extra text.\n")
-		b.WriteString("- Translate EVERY input line. The output array length MUST equal the input array length.\n")
-		b.WriteString("- Each line must be translated as a standalone unit. Do NOT merge consecutive lines or split one line into multiple translations, even if the line appears to be an incomplete sentence.\n")
-		b.WriteString("- The \"number\" field must match the input number exactly.\n")
+		fmt.Fprintf(&b, systemIntroTmpl, langName)
+		b.WriteString(systemStyleRules)
+		b.WriteString(systemJSONFormat)
+		b.WriteString(systemRules)
 	}
 
 	if opts.Instructions != "" {
@@ -136,7 +149,7 @@ func buildUserContent(lines []*Line, ctx PromptContext, opts Options) string {
 	var b strings.Builder
 
 	if len(ctx.ContextLines) > 0 {
-		b.WriteString("Context from previous batch (do not retranslate):\n")
+		b.WriteString(batchContextHeader)
 		ctxInput := make([]subtitleInput, len(ctx.ContextLines))
 		for i, l := range ctx.ContextLines {
 			ctxInput[i] = subtitleInput{Number: i + 1, Text: l.Text, Translation: l.Translation}

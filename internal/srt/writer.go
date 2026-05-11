@@ -3,6 +3,7 @@ package srt
 import (
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,18 +33,24 @@ func Format(lines []*translator.Line, opts FormatOptions) string {
 			translation = stripTrailing(translation)
 		}
 
-		_, _ = fmt.Fprintf(&b, "%d\n", number)
-		_, _ = fmt.Fprintf(&b, "%s --> %s\n", FormatTimestamp(line.Start), FormatTimestamp(line.End))
+		b.WriteString(strconv.Itoa(number))
+		b.WriteByte('\n')
+		b.WriteString(FormatTimestamp(line.Start))
+		b.WriteString(" --> ")
+		b.WriteString(FormatTimestamp(line.End))
+		b.WriteByte('\n')
 
 		if opts.IncludeOriginal && line.Text != "" {
 			original := line.Text
 			if opts.StripTrailingPunctuation {
 				original = stripTrailing(original)
 			}
-			_, _ = fmt.Fprintf(&b, "%s\n", original)
+			b.WriteString(original)
+			b.WriteByte('\n')
 		}
 
-		_, _ = fmt.Fprintf(&b, "%s\n\n", translation)
+		b.WriteString(translation)
+		b.WriteString("\n\n")
 		number++
 	}
 

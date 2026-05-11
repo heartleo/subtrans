@@ -36,13 +36,21 @@ var (
 	ErrTranslationIncomplete = errors.New("subtrans: translation incomplete")
 )
 
+// Default connection-level settings, exposed for callers that wish to inspect
+// them. Mirrored by [New] when zero-valued Config fields are passed in.
+const (
+	DefaultBaseURL    = "https://api.openai.com/v1"
+	DefaultModel      = "gpt-4.1"
+	DefaultMaxRetries = 3
+)
+
 // Config holds the connection-level configuration for the LLM API.
 type Config struct {
 	APIKey      string
-	BaseURL     string // default: "https://api.openai.com/v1"
-	Model       string // default: "gpt-4.1"
-	Temperature float64
-	MaxRetries  int // default: 3
+	BaseURL     string  // default: [DefaultBaseURL]
+	Model       string  // default: [DefaultModel]
+	Temperature float64 // default: 0
+	MaxRetries  int     // default: [DefaultMaxRetries]
 }
 
 // Result holds the output of a translation.
@@ -73,13 +81,13 @@ func New(cfg Config) (*Translator, error) {
 		MaxRetries:  cfg.MaxRetries,
 	}
 	if conf.BaseURL == "" {
-		conf.BaseURL = "https://api.openai.com/v1"
+		conf.BaseURL = DefaultBaseURL
 	}
 	if conf.Model == "" {
-		conf.Model = "gpt-4.1"
+		conf.Model = DefaultModel
 	}
 	if conf.MaxRetries == 0 {
-		conf.MaxRetries = 3
+		conf.MaxRetries = DefaultMaxRetries
 	}
 
 	return &Translator{
@@ -98,11 +106,11 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		return nil, fmt.Errorf("%w: language is required", ErrInvalidConfig)
 	}
 
-	// Set defaults, then apply options.
+	defaults := translator.DefaultOptions()
 	o := options{
-		maxBatchSize:          translator.DefaultMaxBatchSize,
-		batchSplitPunctuation: translator.DefaultBatchSplitPunctuation,
-		stripPunctuation:      true,
+		maxBatchSize:          defaults.MaxBatchSize,
+		batchSplitPunctuation: defaults.BatchSplitPunctuation,
+		stripPunctuation:      defaults.StripTrailingPunctuation,
 	}
 	for _, opt := range opts {
 		opt.apply(&o)
@@ -119,43 +127,36 @@ func (t *Translator) Translate(ctx context.Context, srtContent string, language 
 		Prompt:                   o.prompt,
 		MaxBatchSize:             o.maxBatchSize,
 		BatchSplitPunctuation:    o.batchSplitPunctuation,
-		Temperature:              0,
 		IncludeOriginal:          o.includeOriginal,
 		StripTrailingPunctuation: o.stripPunctuation,
 	}
 
 	batches := translator.BatchLines(lines, ops)
 
-	h := &collectHandler{}
-	translator.Translate(ctx, batches, ops, t.client, h)
-
-	if h.err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrTranslationIncomplete, h.err)
+	collector := &collectHandler{}
+	if err := translator.Translate(ctx, batches, ops, t.client, collector); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrTranslationIncomplete, err)
 	}
 
-	var allLines []*translator.Line
-	for _, batch := range batches {
-		allLines = append(allLines, batch.Lines...)
-	}
-
-	srtOutput := srt.Format(allLines, srt.FormatOptions{
+	srtOutput := srt.Format(collector.lines, srt.FormatOptions{
 		IncludeOriginal:          o.includeOriginal,
 		StripTrailingPunctuation: o.stripPunctuation,
 	})
 
 	return &Result{
 		SRT:        srtOutput,
-		LineCount:  len(allLines),
+		LineCount:  len(collector.lines),
 		BatchCount: len(batches),
 	}, nil
 }
 
-// collectHandler implements translator.TranslationHandler to collect errors.
+// collectHandler implements translator.TranslationHandler to capture the
+// final line set delivered to OnDone.
 type collectHandler struct {
 	translator.BaseHandler
-	err error
+	lines []*translator.Line
 }
 
-func (h *collectHandler) OnError(_ int, err error) {
-	h.err = err
+func (h *collectHandler) OnDone(lines []*translator.Line) {
+	h.lines = lines
 }

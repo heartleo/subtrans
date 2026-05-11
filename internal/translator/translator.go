@@ -30,20 +30,24 @@ func lastNLines(lines []*Line, n int) []*Line {
 }
 
 // Translate runs the serial translation loop over all batches.
-func Translate(ctx context.Context, batches []*Batch, opts Options, completer Completer, handler TranslationHandler) {
+// Returns the first fatal error encountered; handler still receives progress
+// callbacks (OnBatchDone, OnError). OnDone fires only on full success.
+func Translate(ctx context.Context, batches []*Batch, opts Options, completer Completer, handler TranslationHandler) error {
 	var contextLines []*Line
 
 	for _, batch := range batches {
 		if err := ctx.Err(); err != nil {
-			handler.OnError(0, fmt.Errorf("context cancelled: %w", err))
-			return
+			wrapped := fmt.Errorf("context cancelled: %w", err)
+			handler.OnError(0, wrapped)
+			return wrapped
 		}
 
 		messages := BuildPrompt(batch.Lines, PromptContext{ContextLines: contextLines}, opts)
 		raw, err := completer.Complete(ctx, messages)
 		if err != nil {
-			handler.OnError(batch.Number, fmt.Errorf("API error: %w", err))
-			return
+			wrapped := fmt.Errorf("batch %d: API error: %w", batch.Number, err)
+			handler.OnError(batch.Number, wrapped)
+			return wrapped
 		}
 
 		result, parseErr := ParseResponse(raw, batch.Lines)
@@ -92,14 +96,14 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 		}
 
 		if len(missingNums) > 0 {
-			err := fmt.Errorf("%d lines still untranslated after %d retries: %v",
-				len(missingNums), maxTranslationRetries, missingNums)
+			fatal := fmt.Errorf("batch %d: %d lines still untranslated after %d retries: %v",
+				batch.Number, len(missingNums), maxTranslationRetries, missingNums)
 			slog.Error("translation incomplete, aborting",
 				"batch", batch.Number,
 				"missing_count", len(missingNums), "missing_lines", missingNums)
-			batch.Errors = append(batch.Errors, err)
-			handler.OnError(batch.Number, err)
-			return
+			batch.Errors = append(batch.Errors, fatal)
+			handler.OnError(batch.Number, fatal)
+			return fatal
 		}
 
 		contextLines = lastNLines(batch.Lines, batchContextLines)
@@ -113,4 +117,5 @@ func Translate(ctx context.Context, batches []*Batch, opts Options, completer Co
 		allLines = append(allLines, batch.Lines...)
 	}
 	handler.OnDone(allLines)
+	return nil
 }

@@ -39,7 +39,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	language := r.FormValue("language")
 	if language == "" {
-		language = "zh"
+		language = translator.DefaultOptions().TargetLanguage
 	}
 
 	file, _, err := r.FormFile("file")
@@ -87,12 +87,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // servePlain runs translation synchronously and returns the SRT text directly.
 func (h *Handler) servePlain(w http.ResponseWriter, r *http.Request, batches []*translator.Batch, opts translator.Options, fmtOpts srt.FormatOptions) {
-	ph := &plainHandler{}
-
-	translator.Translate(r.Context(), batches, opts, h.completer, ph)
-
-	if ph.Err != "" {
-		writeJSON(w, http.StatusInternalServerError, ph.Err)
+	if err := translator.Translate(r.Context(), batches, opts, h.completer, translator.BaseHandler{}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -110,7 +106,8 @@ func (h *Handler) serveSSE(w http.ResponseWriter, r *http.Request, batches []*tr
 	w.WriteHeader(http.StatusOK)
 
 	sh := &sseHandler{w: w, fmtOpts: fmtOpts}
-	translator.Translate(r.Context(), batches, opts, h.completer, sh)
+	// Errors are streamed to the client via sseHandler.OnError.
+	_ = translator.Translate(r.Context(), batches, opts, h.completer, sh)
 }
 
 func collectLines(batches []*translator.Batch) []*translator.Line {
@@ -136,12 +133,3 @@ func writeJSON(w http.ResponseWriter, code int, msg string) {
 	_, _ = w.Write(b)
 }
 
-// plainHandler collects errors for synchronous HTTP responses.
-type plainHandler struct {
-	translator.BaseHandler
-	Err string
-}
-
-func (h *plainHandler) OnError(_ int, err error) {
-	h.Err = err.Error()
-}
